@@ -1,7 +1,6 @@
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <SDKDDKVer.h>
 
 using namespace std;
 
@@ -47,14 +46,35 @@ int main() {
     else
         cout << "listen() is good, waiting for connections..." << endl;
 
-    // Rest of your code for listening and accepting connections goes here
-
-    SOCKET acceptSocket;
-    acceptSocket = accept(serverSocket, NULL, NULL);
+    // Accept a client connection
+    SOCKET acceptSocket = accept(serverSocket, NULL, NULL);
     if (acceptSocket == INVALID_SOCKET) {
         cout << "Accept failed: " << WSAGetLastError() << endl;
     }
 
+    // Receiving
+    char receiveBuffer[200] = "";
+    int byteCount = recv(acceptSocket, receiveBuffer, 200, 0);
+    if (byteCount < 0) {
+        printf("Receive error %ld.\n", WSAGetLastError());
+    }
+    else {
+        printf("Received data: %s \n", receiveBuffer);
+    }
+
+    char buffer[200];
+    printf("Enter your Message: ");
+    cin.getline(buffer, 200);
+    int sendByteCount = send(acceptSocket, buffer, 200, 0);
+    if (sendByteCount == SOCKET_ERROR) {
+        printf("Send error %ld.\n", WSAGetLastError());
+    }
+    else {
+        printf("Sent %d bytes \n", sendByteCount);
+    }
+
+    closesocket(acceptSocket); // Close the accepted socket
+    closesocket(serverSocket);  // Close the server socket
     WSACleanup(); // Cleanup Winsock when done
     return 0;
 }
