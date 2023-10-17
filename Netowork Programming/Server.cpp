@@ -1,8 +1,22 @@
 #include <iostream>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <string>
+#include <map>
+#include <fstream>
+#include <thread>
 
 using namespace std;
+
+void SaveUserData(const map<string, string>& users) {
+    ofstream userFile("users.txt");
+    if (userFile.is_open()) {
+        for (const auto& entry : users) {
+            userFile << entry.first << " " << entry.second << endl;
+        }
+        userFile.close();
+    }
+}
 
 int main() {
     WSADATA wsaData;
@@ -18,22 +32,18 @@ int main() {
     cout << "The Winsock DLL found!" << endl;
     cout << "The Status: " << wsaData.szSystemStatus << endl;
 
-    // Create a socket
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (serverSocket == INVALID_SOCKET) {
         cout << "Error at socket(): " << WSAGetLastError() << endl;
         WSACleanup();
         return 1;
     }
-    else {
-        cout << "socket() is good" << endl;
-    }
 
-    // Bind the socket
     sockaddr_in service;
     service.sin_family = AF_INET;
-    InetPton(AF_INET, L"127.0.0.1", &service.sin_addr.s_addr);
+    service.sin_addr.s_addr = INADDR_ANY;
     service.sin_port = htons(8080);
+
     if (bind(serverSocket, (SOCKADDR*)&service, sizeof(service)) == SOCKET_ERROR) {
         cout << "bind() failed: " << WSAGetLastError() << endl;
         closesocket(serverSocket);
@@ -41,40 +51,101 @@ int main() {
         return 1;
     }
 
-    if (listen(serverSocket, 1) == SOCKET_ERROR)
-        cout << "listen(): Error listening on socket " << WSAGetLastError() << endl;
-    else
+    if (listen(serverSocket, 5) == SOCKET_ERROR) {
+        cout << "listen() failed: " << WSAGetLastError() << endl;
+        closesocket(serverSocket);
+        WSACleanup();
+        return 1;
+    }
+    else {
         cout << "listen() is good, waiting for connections..." << endl;
-
-    // Accept a client connection
-    SOCKET acceptSocket = accept(serverSocket, NULL, NULL);
-    if (acceptSocket == INVALID_SOCKET) {
-        cout << "Accept failed: " << WSAGetLastError() << endl;
     }
 
-    // Receiving
-    char receiveBuffer[200] = "";
-    int byteCount = recv(acceptSocket, receiveBuffer, 200, 0);
-    if (byteCount < 0) {
-        printf("Receive error %ld.\n", WSAGetLastError());
-    }
-    else {
-        printf("Received data: %s \n", receiveBuffer);
+    map<string, string> users;
+    thread saveThread([&users] { SaveUserData(users); });
+    while (true) {
+        SOCKET acceptSocket = accept(serverSocket, NULL, NULL);
+        if (acceptSocket == INVALID_SOCKET) {
+            cout << "Accept failed: " << WSAGetLastError() << endl;
+            continue;
+        }
+
+        int choice;
+        int byteCount = recv(acceptSocket, (char*)&choice, sizeof(choice), 0);
+
+        if (byteCount <= 0) {
+            cout << "Client disconnected." << endl;
+            closesocket(acceptSocket);
+            continue;
+        }
+
+        if (choice == 1) {
+            char username[100];
+            char password[100];
+
+            byteCount = recv(acceptSocket, username, sizeof(username) - 1, 0);
+            if (byteCount <= 0) {
+                cout << "Client disconnected during registration." << endl;
+                closesocket(acceptSocket);
+                continue;
+            }
+            username[byteCount] = '\0';
+
+            byteCount = recv(acceptSocket, password, sizeof(password) - 1, 0);
+            if (byteCount <= 0) {
+                cout << "Client disconnected during registration." << endl;
+                closesocket(acceptSocket);
+                continue;
+            }
+            password[byteCount] = '\0';
+
+            if (users.find(username) != users.end()) {
+                const char* response = "Username already taken";
+                send(acceptSocket, response, strlen(response), 0);
+            }
+            else {
+                users[username] = password;
+                const char* response = "Registration successful";
+                send(acceptSocket, response, strlen(response), 0);
+            }
+        }
+        else if (choice == 2) {
+            char username[100];
+            char password[100];
+
+            byteCount = recv(acceptSocket, username, sizeof(username) - 1, 0);
+            if (byteCount <= 0) {
+                cout << "Client disconnected during login." << endl;
+                closesocket(acceptSocket);
+                continue;
+            }
+            username[byteCount] = '\0';
+
+            byteCount = recv(acceptSocket, password, sizeof(password) - 1, 0);
+            if (byteCount <= 0) {
+                cout << "Client disconnected during login." << endl;
+                closesocket(acceptSocket);
+                continue;
+            }
+            password[byteCount] = '\0';
+
+            if (users.find(username) != users.end() && users[username] == password) {
+                const char* response = "Authentication successful";
+                send(acceptSocket, response, strlen(response), 0);
+            }
+            else {
+                const char* response = "Authentication failed";
+                send(acceptSocket, response, strlen(response), 0);
+            }
+        }
+
+        closesocket(acceptSocket);
     }
 
-    char buffer[200];
-    printf("Enter your Message: ");
-    cin.getline(buffer, 200);
-    int sendByteCount = send(acceptSocket, buffer, 200, 0);
-    if (sendByteCount == SOCKET_ERROR) {
-        printf("Send error %ld.\n", WSAGetLastError());
-    }
-    else {
-        printf("Sent %d bytes \n", sendByteCount);
-    }
+    saveThread.join(); // Join the saveThread before exiting
+    SaveUserData(users);
 
-    closesocket(acceptSocket); // Close the accepted socket
-    closesocket(serverSocket);  // Close the server socket
-    WSACleanup(); // Cleanup Winsock when done
+    closesocket(serverSocket);
+    WSACleanup();
     return 0;
 }
