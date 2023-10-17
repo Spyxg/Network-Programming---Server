@@ -5,8 +5,11 @@
 #include <map>
 #include <fstream>
 #include <thread>
+#include "json.hpp"
+
 
 using namespace std;
+
 
 void SaveUserData(const map<string, string>& users) {
     ofstream userFile("users.txt");
@@ -18,10 +21,13 @@ void SaveUserData(const map<string, string>& users) {
     }
 }
 
+
+
 int main() {
     WSADATA wsaData;
     int wsaerr;
     WORD wVersionRequested = MAKEWORD(2, 2);
+
 
     wsaerr = WSAStartup(wVersionRequested, &wsaData);
     if (wsaerr != 0) {
@@ -74,7 +80,12 @@ int main() {
         int byteCount = recv(acceptSocket, (char*)&choice, sizeof(choice), 0);
 
         if (byteCount <= 0) {
+            if (byteCount == 0) {
             cout << "Client disconnected." << endl;
+            }
+            else {
+                cout << "recv failed with error: " << WSAGetLastError() << endl;
+            }
             closesocket(acceptSocket);
             continue;
         }
@@ -109,7 +120,7 @@ int main() {
                 send(acceptSocket, response, strlen(response), 0);
             }
         }
-        else if (choice == 2) {
+        if (choice == 2) {
             char username[100];
             char password[100];
 
@@ -129,7 +140,7 @@ int main() {
             }
             password[byteCount] = '\0';
 
-            if (users.find(username) != users.end() && users[username] == password) {
+            if (users.find(username) != users.end() && users[username] == std::string(password)) {
                 const char* response = "Authentication successful";
                 send(acceptSocket, response, strlen(response), 0);
             }
