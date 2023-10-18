@@ -6,41 +6,62 @@
 #include <fstream>
 #include <thread>
 #include "json.hpp"
+#include <mutex>
 
+void SaveUserData(const std::map<std::string, std::string>& users, std::mutex& saveMutex) {
+    nlohmann::json jsonData;
+    for (const auto& entry : users) {
+        jsonData[entry.first] = entry.second;
+    }
 
-using namespace std;
-
-
-void SaveUserData(const map<string, string>& users) {
-    ofstream userFile("users.txt");
+    std::ofstream userFile("users.json");
     if (userFile.is_open()) {
-        for (const auto& entry : users) {
-            userFile << entry.first << " " << entry.second << endl;
-        }
+        userFile << jsonData.dump();
         userFile.close();
     }
+    else {
+        std::cerr << "Error saving user data to file." << std::endl;
+    }
+
+   // saveMutex.unlock();
 }
 
+std::map<std::string, std::string> LoadUserData() {
+    std::map<std::string, std::string> users;
+    std::ifstream userFile("users.json");
+    if (userFile.is_open()) {
+        nlohmann::json jsonData;
+        userFile >> jsonData;
 
+        for (auto it = jsonData.begin(); it != jsonData.end(); ++it) {
+            users[it.key()] = it.value();
+        }
+
+        userFile.close();
+    }
+    else {
+        std::cerr << "Error loading user data from file." << std::endl;
+    }
+    return users;
+}
 
 int main() {
     WSADATA wsaData;
     int wsaerr;
     WORD wVersionRequested = MAKEWORD(2, 2);
 
-
     wsaerr = WSAStartup(wVersionRequested, &wsaData);
     if (wsaerr != 0) {
-        cout << "WSAStartup failed with error: " << wsaerr << endl;
+        std::cout << "WSAStartup failed with error: " << wsaerr << std::endl;
         return 1;
     }
 
-    cout << "The Winsock DLL found!" << endl;
-    cout << "The Status: " << wsaData.szSystemStatus << endl;
+    std::cout << "The Winsock DLL found!" << std::endl;
+    std::cout << "The Status: " << wsaData.szSystemStatus << std::endl;
 
     SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (serverSocket == INVALID_SOCKET) {
-        cout << "Error at socket(): " << WSAGetLastError() << endl;
+        std::cout << "Error at socket(): " << WSAGetLastError() << std::endl;
         WSACleanup();
         return 1;
     }
@@ -51,40 +72,42 @@ int main() {
     service.sin_port = htons(8080);
 
     if (bind(serverSocket, (SOCKADDR*)&service, sizeof(service)) == SOCKET_ERROR) {
-        cout << "bind() failed: " << WSAGetLastError() << endl;
+        std::cout << "bind() failed: " << WSAGetLastError() << std::endl;
         closesocket(serverSocket);
         WSACleanup();
         return 1;
     }
 
     if (listen(serverSocket, 5) == SOCKET_ERROR) {
-        cout << "listen() failed: " << WSAGetLastError() << endl;
+        std::cout << "listen() failed: " << WSAGetLastError() << std::endl;
         closesocket(serverSocket);
         WSACleanup();
         return 1;
     }
     else {
-        cout << "listen() is good, waiting for connections..." << endl;
+        std::cout << "listen() is good, waiting for connections..." << std::endl;
     }
 
-    map<string, string> users;
-    thread saveThread([&users] { SaveUserData(users); });
+    std::map<std::string, std::string> users = LoadUserData();
+    std::mutex saveMutex;  // Mutex for synchronization
+    std::thread saveThread([&users, &saveMutex] { SaveUserData(users, saveMutex); });
+
     while (true) {
-        SOCKET acceptSocket = accept(serverSocket, NULL, NULL);
+        SOCKET acceptSocket = accept(serverSocket, nullptr, nullptr);
         if (acceptSocket == INVALID_SOCKET) {
-            cout << "Accept failed: " << WSAGetLastError() << endl;
+            std::cout << "Accept failed: " << WSAGetLastError() << std::endl;
             continue;
         }
 
         int choice;
-        int byteCount = recv(acceptSocket, (char*)&choice, sizeof(choice), 0);
+        int byteCount = recv(acceptSocket, reinterpret_cast<char*>(&choice), sizeof(choice), 0);
 
         if (byteCount <= 0) {
             if (byteCount == 0) {
-            cout << "Client disconnected." << endl;
+                std::cout << "Client disconnected." << std::endl;
             }
             else {
-                cout << "recv failed with error: " << WSAGetLastError() << endl;
+                std::cout << "recv failed with error: " << WSAGetLastError() << std::endl;
             }
             closesocket(acceptSocket);
             continue;
@@ -96,7 +119,7 @@ int main() {
 
             byteCount = recv(acceptSocket, username, sizeof(username) - 1, 0);
             if (byteCount <= 0) {
-                cout << "Client disconnected during registration." << endl;
+                std::cout << "Client disconnected during registration." << std::endl;
                 closesocket(acceptSocket);
                 continue;
             }
@@ -104,7 +127,7 @@ int main() {
 
             byteCount = recv(acceptSocket, password, sizeof(password) - 1, 0);
             if (byteCount <= 0) {
-                cout << "Client disconnected during registration." << endl;
+                std::cout << "Client disconnected during registration." << std::endl;
                 closesocket(acceptSocket);
                 continue;
             }
@@ -126,7 +149,7 @@ int main() {
 
             byteCount = recv(acceptSocket, username, sizeof(username) - 1, 0);
             if (byteCount <= 0) {
-                cout << "Client disconnected during login." << endl;
+                std::cout << "Client disconnected during login." << std::endl;
                 closesocket(acceptSocket);
                 continue;
             }
@@ -134,7 +157,7 @@ int main() {
 
             byteCount = recv(acceptSocket, password, sizeof(password) - 1, 0);
             if (byteCount <= 0) {
-                cout << "Client disconnected during login." << endl;
+                std::cout << "Client disconnected during login." << std::endl;
                 closesocket(acceptSocket);
                 continue;
             }
@@ -151,10 +174,13 @@ int main() {
         }
 
         closesocket(acceptSocket);
+        saveMutex.lock();
+        SaveUserData(users, saveMutex);
+        saveMutex.unlock();
     }
 
-    saveThread.join(); // Join the saveThread before exiting
-    SaveUserData(users);
+    saveThread.join();
+    SaveUserData(users, saveMutex);
 
     closesocket(serverSocket);
     WSACleanup();
